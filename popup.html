@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f8f9fa;
+      color: #333;
+    }
+    .header {
+      background: linear-gradient(135deg, #4285f4, #34a853);
+      color: white;
+      padding: 16px;
+      text-align: center;
+    }
+    .header h1 { font-size: 16px; font-weight: 600; }
+    .header p { font-size: 11px; opacity: 0.9; margin-top: 4px; }
+    .content { padding: 16px; }
+    .page-info {
+      background: white;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      border: 1px solid #e0e0e0;
+    }
+    .page-info .title {
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .page-info .url {
+      font-size: 11px;
+      color: #888;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 4px;
+    }
+    .options {
+      background: white;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      border: 1px solid #e0e0e0;
+    }
+    .options label {
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .options label:last-child { margin-bottom: 0; }
+    .options input[type="checkbox"] {
+      margin-right: 8px;
+      accent-color: #4285f4;
+    }
+    .progress-area {
+      display: none;
+      background: white;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      border: 1px solid #e0e0e0;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #e0e0e0;
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 8px 0;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4285f4, #34a853);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+    .progress-text {
+      font-size: 11px;
+      color: #666;
+      text-align: center;
+    }
+    .status-text {
+      font-size: 12px;
+      color: #333;
+      margin-bottom: 4px;
+    }
+    .btn {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn-primary {
+      background: linear-gradient(135deg, #4285f4, #34a853);
+      color: white;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .success-icon { color: #34a853; font-size: 20px; }
+    .error-icon { color: #ea4335; font-size: 20px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>💾 网页保存器</h1>
+    <p>保存网页为离线可查看的 HTML</p>
+  </div>
+  <div class="content">
+    <!-- 当前页面信息 -->
+    <div class="page-info">
+      <div class="title" id="pageTitle">加载中...</div>
+      <div class="url" id="pageUrl">-</div>
+    </div>
+
+    <!-- 选项 -->
+    <div class="options">
+      <label>
+        <input type="checkbox" id="optImages" checked> 下载图片资源
+      </label>
+      <label>
+        <input type="checkbox" id="optVideos" checked> 下载视频资源
+      </label>
+      <label>
+        <input type="checkbox" id="optInlineStyles" checked> 保留内联样式
+      </label>
+    </div>
+
+    <!-- 进度 -->
+    <div class="progress-area" id="progressArea">
+      <div class="status-text" id="statusText">准备中...</div>
+      <div class="progress-bar">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-text" id="progressText">0 / 0</div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <button class="btn btn-primary" id="saveBtn">保存当前网页</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
