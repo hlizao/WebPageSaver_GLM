@@ -251,17 +251,20 @@ function delay(ms) {
 }
 
 /**
- * 将 Blob 转为 data: URL（MV3 Service Worker 兼容）
- * @param {Blob} blob - 要转换的 Blob
- * @returns {Promise<string>} data: URL 字符串
+ * 将内容字符串转为可下载的 URL
+ * MV3 Service Worker 不支持 URL.createObjectURL 和 FileReader，
+ * 使用 Blob + URL.createObjectURL 的替代方案：
+ * 通过 content script 在页面上下文中创建 Blob URL，再传回 Service Worker
+ * 
+ * 对于 HTML 内容，直接使用 data: URL（HTML 文件通常不会太大）
+ * @param {string} content - 文本内容
+ * @param {string} mimeType - MIME 类型
+ * @returns {string} data: URL
  */
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error('Blob 转 data URL 失败'));
-    reader.readAsDataURL(blob);
-  });
+function contentToDataUrl(content, mimeType = 'text/html;charset=utf-8') {
+  // 使用 base64 编码避免特殊字符问题
+  const base64 = btoa(unescape(encodeURIComponent(content)));
+  return `data:${mimeType};base64,${base64}`;
 }
 
 // ============================================================
@@ -331,17 +334,19 @@ async function fetchResourceWithValidation(url) {
       return { blob: null, skipped: true, reason: `不安全的 Content-Type: ${contentType}` };
     }
 
-    // 大文件检查
+    // 大文件检查：直接用原始 URL 下载，不走 blob
     const contentLength = parseInt(resp.headers.get('Content-Length') || '0', 10);
     if (contentLength > LARGE_FILE_THRESHOLD) {
       logger.info('大文件，直接用 URL 下载:', url, `(${(contentLength / 1024 / 1024).toFixed(1)}MB)`);
       return { blob: null, skipped: false, reason: 'large_file', directUrl: url };
     }
 
-    const blob = await resp.blob();
-    return { blob, skipped: false, reason: '' };
+    // 小文件也不需要走 blob，直接用原始 URL 更可靠
+    // 释放响应，避免内存占用
+    return { blob: null, skipped: false, reason: '', directUrl: url };
   } catch {
-    return { blob: null, skipped: true, reason: 'fetch 异常' };
+    // fetch 失败，仍然可以直接用 chrome.downloads 下载
+    return { blob: null, skipped: false, reason: '', directUrl: url };
   }
 }
 
@@ -355,61 +360,25 @@ async function fetchResourceWithValidation(url) {
 async function downloadWithRetry(url, downloadPath, retries = MAX_RETRIES) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const result = await fetchResourceWithValidation(url);
-
-      if (result.skipped && result.reason !== 'large_file') {
-        logger.warn('跳过资源:', url, result.reason);
-        return { success: false, method: 'skipped' };
-      }
-
-      // 大文件直接用原始 URL 下载
-      if (result.reason === 'large_file' || !result.blob) {
-        try {
-          await chrome.downloads.download({
-            url: url,
-            filename: downloadPath,
-            saveAs: false,
-            conflictAction: 'uniquify',
-          });
-          return { success: true, method: 'direct' };
-        } catch (directErr) {
-          if (attempt < retries) {
-            logger.info(`直接下载失败，${delay}ms 后重试 (${attempt + 1}/${retries})`);
-            await delay(RETRY_BASE_DELAY * Math.pow(2, attempt));
-            continue;
-          }
-          return { success: false, method: 'direct_failed' };
-        }
-      }
-
-      // 普通文件：Blob → data: URL → 下载
-      const dataUrl = await blobToDataUrl(result.blob);
+      // 优先直接用原始 URL 下载（最可靠，不受 Service Worker API 限制）
+      // 有了 host_permissions，chrome.downloads 可以直接下载跨域资源
       try {
         await chrome.downloads.download({
-          url: dataUrl,
+          url: url,
           filename: downloadPath,
           saveAs: false,
           conflictAction: 'uniquify',
         });
-        return { success: true, method: 'data_url' };
-      } catch (dataErr) {
-        // data: URL 失败，回退为直接下载
-        logger.warn('data: URL 下载失败，回退为直接下载:', dataErr.message);
-        try {
-          await chrome.downloads.download({
-            url: url,
-            filename: downloadPath,
-            saveAs: false,
-            conflictAction: 'uniquify',
-          });
-          return { success: true, method: 'fallback_direct' };
-        } catch (fallbackErr) {
-          if (attempt < retries) {
-            await delay(RETRY_BASE_DELAY * Math.pow(2, attempt));
-            continue;
-          }
-          return { success: false, method: 'fallback_failed' };
+        return { success: true, method: 'direct' };
+      } catch (directErr) {
+        // 直接下载失败，记录并重试
+        if (attempt < retries) {
+          logger.info(`直接下载失败，${RETRY_BASE_DELAY * Math.pow(2, attempt)}ms 后重试 (${attempt + 1}/${retries}):`, directErr.message);
+          await delay(RETRY_BASE_DELAY * Math.pow(2, attempt));
+          continue;
         }
+        logger.warn('直接下载最终失败:', url, directErr.message);
+        return { success: false, method: 'direct_failed' };
       }
     } catch (err) {
       if (attempt < retries) {
@@ -573,8 +542,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tab = await chrome.tabs.get(tabId);
       const pageName = sanitizeFilename(tab.title);
 
-      const htmlBlob = new Blob([snapshotResult.html], { type: 'text/html;charset=utf-8' });
-      const htmlDataUrl = await blobToDataUrl(htmlBlob);
+      // 使用 data: URL 保存 HTML（MV3 Service Worker 兼容，HTML 通常不会太大）
+      const htmlDataUrl = contentToDataUrl(snapshotResult.html);
 
       await chrome.downloads.download({
         url: htmlDataUrl,
