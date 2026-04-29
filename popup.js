@@ -16,6 +16,7 @@ const statusText = document.getElementById('statusText');
 const optImages = document.getElementById('optImages');
 const optVideos = document.getElementById('optVideos');
 const optInlineStyles = document.getElementById('optInlineStyles');
+const optAudio = document.getElementById('optAudio');
 
 // ============================================================
 // 初始化：获取当前标签页信息
@@ -43,6 +44,7 @@ saveBtn.addEventListener('click', async () => {
   const options = {
     downloadImages: optImages.checked,
     downloadVideos: optVideos.checked,
+    downloadAudio: optAudio.checked,
     keepInlineStyles: optInlineStyles.checked,
   };
 

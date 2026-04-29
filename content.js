@@ -88,6 +88,24 @@ function collectMediaResources(options) {
     });
   }
 
+  // ---------- 音频资源 ----------
+  if (options.downloadAudio) {
+    document.querySelectorAll('audio').forEach((audio) => {
+      const src = audio.src || audio.querySelector('source')?.src;
+      if (src && !src.startsWith('data:') && !src.startsWith('blob:') && !seenUrls.has(src)) {
+        seenUrls.add(src);
+        resources.push({ url: src, type: 'audio', attributeName: 'src' });
+      }
+      audio.querySelectorAll('source').forEach((source) => {
+        const s = source.src;
+        if (s && !s.startsWith('data:') && !s.startsWith('blob:') && !seenUrls.has(s)) {
+          seenUrls.add(s);
+          resources.push({ url: s, type: 'audio', attributeName: 'src' });
+        }
+      });
+    });
+  }
+
   return { mediaResources: resources };
 }
 
@@ -154,6 +172,20 @@ function generateSnapshot(options, urlMapping) {
       });
     });
   }
+
+  // ---------- 重写音频路径 ----------
+  clone.querySelectorAll('audio').forEach((audio) => {
+    const src = audio.getAttribute('src');
+    if (src && urlMapping[src]) {
+      audio.setAttribute('src', './media/' + urlMapping[src]);
+    }
+    audio.querySelectorAll('source').forEach((source) => {
+      const s = source.getAttribute('src');
+      if (s && urlMapping[s]) {
+        source.setAttribute('src', './media/' + urlMapping[s]);
+      }
+    });
+  });
 
   // ---------- 注入基础样式，确保页面可读 ----------
   const baseStyle = document.createElement('style');
