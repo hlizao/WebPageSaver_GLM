@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "网页保存器",
-  "version": "1.0.0",
-  "description": "将当前网页保存为本地 HTML 文件，并下载媒体资源到 media 文件夹，支持离线完整查看",
+  "version": "1.1.0",
+  "description": "将当前网页保存为本地 HTML 文件，并下载媒体资源到分类子目录，支持离线完整查看",
   "permissions": [
     "activeTab",
     "scripting",
     "downloads",
-    "storage"
+    "storage",
+    "notifications"
   ],
   "action": {
     "default_popup": "popup.html",

@@ -1,6 +1,6 @@
 /**
  * popup.js - 弹出界面逻辑
- * 负责展示页面信息、用户确认、进度显示
+ * 负责展示页面信息、用户选项、进度反馈
  */
 
 // ============================================================
@@ -11,12 +11,20 @@ const pageUrl = document.getElementById('pageUrl');
 const saveBtn = document.getElementById('saveBtn');
 const progressArea = document.getElementById('progressArea');
 const progressFill = document.getElementById('progressFill');
-const progressText = document.getElementById('progressText');
+const progressPercent = document.getElementById('progressPercent');
 const statusText = document.getElementById('statusText');
+const statsSuccess = document.getElementById('statsSuccess');
+const statsSkipped = document.getElementById('statsSkipped');
+const statsFailed = document.getElementById('statsFailed');
 const optImages = document.getElementById('optImages');
 const optVideos = document.getElementById('optVideos');
-const optInlineStyles = document.getElementById('optInlineStyles');
 const optAudio = document.getElementById('optAudio');
+const optInlineStyles = document.getElementById('optInlineStyles');
+
+// 统计计数
+let successCount = 0;
+let skippedCount = 0;
+let failedCount = 0;
 
 // ============================================================
 // 初始化：获取当前标签页信息
@@ -35,12 +43,19 @@ saveBtn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.id) return;
 
-  // 禁用按钮，显示进度区域
+  // 重置状态
   saveBtn.disabled = true;
   progressArea.style.display = 'block';
   statusText.textContent = '正在分析页面...';
+  progressFill.style.width = '0%';
+  progressPercent.textContent = '0%';
+  statsSuccess.textContent = '';
+  statsSkipped.textContent = '';
+  statsFailed.textContent = '';
+  successCount = 0;
+  skippedCount = 0;
+  failedCount = 0;
 
-  // 收集用户选项
   const options = {
     downloadImages: optImages.checked,
     downloadVideos: optVideos.checked,
@@ -48,20 +63,17 @@ saveBtn.addEventListener('click', async () => {
     keepInlineStyles: optInlineStyles.checked,
   };
 
-  // 向 background 发送保存请求
   chrome.runtime.sendMessage(
     {
       action: 'savePage',
       tabId: tab.id,
-      options: options,
+      options,
     },
     (response) => {
       if (chrome.runtime.lastError) {
         statusText.textContent = '❌ 启动失败: ' + chrome.runtime.lastError.message;
         saveBtn.disabled = false;
-        return;
       }
-      // 保存任务已启动，后续进度通过消息更新
     }
   );
 });
@@ -71,24 +83,35 @@ saveBtn.addEventListener('click', async () => {
 // ============================================================
 chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'progress') {
-    // 更新进度条和文字
     const { current, total, status } = message;
     const percent = total > 0 ? Math.round((current / total) * 100) : 0;
     progressFill.style.width = percent + '%';
-    progressText.textContent = `${current} / ${total}`;
+    progressPercent.textContent = percent + '%';
     if (status) statusText.textContent = status;
   }
 
   if (message.action === 'complete') {
+    const stats = message.stats || {};
+    successCount = stats.success || 0;
+    skippedCount = stats.skipped || 0;
+    failedCount = stats.failed || 0;
+
     statusText.textContent = '✅ 保存完成！';
     progressFill.style.width = '100%';
-    progressText.textContent = '全部完成';
+    progressPercent.textContent = '100%';
+
+    // 显示统计
+    statsSuccess.textContent = `✅ ${successCount}`;
+    if (skippedCount > 0) statsSkipped.textContent = `⏭️ ${skippedCount}`;
+    if (failedCount > 0) statsFailed.textContent = `❌ ${failedCount}`;
+
     saveBtn.disabled = false;
     saveBtn.textContent = '再次保存';
   }
 
   if (message.action === 'error') {
     statusText.textContent = '❌ ' + (message.error || '保存失败');
+    progressFill.style.width = '0%';
     saveBtn.disabled = false;
   }
 });
