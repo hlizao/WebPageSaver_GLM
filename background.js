@@ -13,8 +13,16 @@
 // ============================================================
 
 /**
+ * 媒体类型对应的子目录名
+ */
+const MEDIA_SUBDIRS = {
+  image: 'pictures',
+  video: 'videos',
+  audio: 'audios',
+};
+
+/**
  * 从 URL 中提取文件名
- * @param {string} url - 资源 URL
  * @returns {string} 文件名
  */
 function extractFilename(url) {
@@ -152,7 +160,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // 确定本地文件名
         const originalName = extractFilename(res.url);
         const localName = ensureUniqueName(originalName, usedNames);
-        urlMapping[res.url] = localName;
+        // 按媒体类型分目录：pictures/videos/audios
+        const subdir = MEDIA_SUBDIRS[res.type] || 'others';
+        const localPath = `${subdir}/${localName}`;
+        urlMapping[res.url] = localPath;
 
         // 尝试下载资源
         const blob = await fetchAsBlob(res.url);
@@ -162,7 +173,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           try {
             await chrome.downloads.download({
               url: blobUrl,
-              filename: `_web_saver_temp/media/${localName}`, // 临时目录，后续会移动
+              filename: `_web_saver_temp/media/${localPath}`,
               saveAs: false,
               conflictAction: 'uniquify',
             });

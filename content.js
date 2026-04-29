@@ -8,6 +8,15 @@
  */
 
 /**
+ * 媒体类型对应的子目录名
+ */
+const MEDIA_SUBDIRS = {
+  image: 'pictures',
+  video: 'videos',
+  audio: 'audios',
+};
+
+/**
  * 音频/视频文件扩展名映射
  */
 const MEDIA_EXTENSIONS = {
@@ -196,9 +205,9 @@ function generateSnapshot(options, urlMapping) {
 
       let modified = text;
       let changed = false;
-      for (const [originalUrl, localName] of Object.entries(urlMapping)) {
+      for (const [originalUrl, localPath] of Object.entries(urlMapping)) {
         if (modified.includes(originalUrl)) {
-          modified = modified.split(originalUrl).join('./media/' + localName);
+          modified = modified.split(originalUrl).join('./media/' + localPath);
           changed = true;
         }
       }
