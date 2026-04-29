@@ -22,19 +22,51 @@ const MEDIA_SUBDIRS = {
 };
 
 /**
- * 从 URL 中提取文件名
- * @returns {string} 文件名
+ * 跨平台路径分隔符（Chrome downloads API 始终使用 /）
+ */
+const PATH_SEP = '/';
+
+/**
+ * Windows 保留文件名（不含扩展名）
+ */
+const WIN_RESERVED_NAMES = new Set([
+  'CON', 'PRN', 'AUX', 'NUL',
+  'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+  'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+]);
+
+/**
+ * 从 URL 中提取文件名（跨平台安全）
+ * @param {string} url - 资源 URL
+ * @returns {string} 安全的文件名
  */
 function extractFilename(url) {
   try {
     const pathname = new URL(url).pathname;
-    const name = pathname.split('/').pop() || '';
+    const rawName = decodeURIComponent(pathname.split(PATH_SEP).pop() || '');
+
     // 如果没有扩展名或文件名为空，生成默认名
-    if (!name || name.length > 200) {
+    if (!rawName || rawName.length > 200) {
       return 'resource_' + Date.now();
     }
-    // URL 解码
-    return decodeURIComponent(name);
+
+    // 清理文件名中的非法字符（覆盖 Windows/macOS/Linux）
+    let safeName = rawName
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')  // 替换非法字符和控制字符
+      .replace(/\s+/g, '_')                       // 空格替换为下划线
+      .replace(/_+/g, '_')                        // 合并连续下划线
+      .replace(/^\.+/, '_')                       // 不以点开头（防止隐藏文件）
+      .replace(/\.+$/, '')                        // 不以点结尾
+      .substring(0, 200);                         // 限制长度
+
+    // 处理 Windows 保留文件名
+    const dotIndex = safeName.lastIndexOf('.');
+    const baseName = dotIndex > 0 ? safeName.substring(0, dotIndex) : safeName;
+    if (WIN_RESERVED_NAMES.has(baseName.toUpperCase())) {
+      safeName = '_' + safeName;
+    }
+
+    return safeName || 'resource_' + Date.now();
   } catch {
     return 'resource_' + Date.now();
   }
@@ -98,16 +130,26 @@ async function fetchAsBlob(url) {
 }
 
 /**
- * 生成页面标题作为文件名（清理非法字符）
+ * 生成页面标题作为文件名（跨平台安全）
  * @param {string} title - 页面标题
  * @returns {string} 安全的文件名
  */
 function sanitizeFilename(title) {
-  return (title || 'page')
-    .replace(/[<>:"/\\|?*]/g, '_')  // 替换非法字符
-    .replace(/\s+/g, '_')            // 空格替换为下划线
-    .replace(/_+/g, '_')             // 合并连续下划线
-    .substring(0, 100);             // 限制长度
+  let safeName = (title || 'page')
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')  // 替换非法字符和控制字符
+    .replace(/\s+/g, '_')                       // 空格替换为下划线
+    .replace(/_+/g, '_')                        // 合并连续下划线
+    .replace(/^\.+/, '_')                       // 不以点开头
+    .substring(0, 100);                         // 限制长度
+
+  // 处理 Windows 保留文件名
+  const dotIndex = safeName.lastIndexOf('.');
+  const baseName = dotIndex > 0 ? safeName.substring(0, dotIndex) : safeName;
+  if (WIN_RESERVED_NAMES.has(baseName.toUpperCase())) {
+    safeName = '_' + safeName;
+  }
+
+  return safeName;
 }
 
 // ============================================================
@@ -162,7 +204,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const localName = ensureUniqueName(originalName, usedNames);
         // 按媒体类型分目录：pictures/videos/audios
         const subdir = MEDIA_SUBDIRS[res.type] || 'others';
-        const localPath = `${subdir}/${localName}`;
+        const localPath = [subdir, localName].join(PATH_SEP);
         urlMapping[res.url] = localPath;
 
         // 尝试下载资源
@@ -173,7 +215,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           try {
             await chrome.downloads.download({
               url: blobUrl,
-              filename: `_web_saver_temp/media/${localPath}`,
+              filename: ['_web_saver_temp', 'media', localPath].join(PATH_SEP),
               saveAs: false,
               conflictAction: 'uniquify',
             });
@@ -209,7 +251,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       await chrome.downloads.download({
         url: htmlBlobUrl,
-        filename: `_web_saver_temp/${pageName}.html`,
+        filename: ['_web_saver_temp', pageName + '.html'].join(PATH_SEP),
         saveAs: false,
         conflictAction: 'uniquify',
       });

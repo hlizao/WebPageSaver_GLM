@@ -8,6 +8,11 @@
  */
 
 /**
+ * 跨平台路径分隔符（HTML 中始终使用 /）
+ */
+const PATH_SEP = '/';
+
+/**
  * 媒体类型对应的子目录名
  */
 const MEDIA_SUBDIRS = {
