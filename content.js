@@ -8,6 +8,56 @@
  */
 
 /**
+ * 音频/视频文件扩展名映射
+ */
+const MEDIA_EXTENSIONS = {
+  audio: ['.m4a', '.mp3', '.wav', '.ogg', '.aac', '.flac', '.wma', '.opus'],
+  video: ['.mp4', '.webm', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.m4v'],
+};
+
+/**
+ * 从页面嵌入的 JSON 数据中提取音频/视频 URL
+ * 扫描 <script> 标签中的 JSON 数据（如 __NEXT_DATA__、__INITIAL_STATE__ 等）
+ * 递归遍历 JSON 对象，查找包含媒体扩展名的 URL 字符串
+ * @param {Array} resources - 资源列表（会被追加）
+ * @param {Set<string>} seenUrls - 已见 URL 集合（去重）
+ * @param {string} mediaType - 'audio' 或 'video'
+ */
+function extractMediaFromEmbeddedJson(resources, seenUrls, mediaType) {
+  const extensions = MEDIA_EXTENSIONS[mediaType];
+  if (!extensions || extensions.length === 0) return;
+
+  // 构建 URL 匹配正则：匹配 http(s)://...扩展名 的 URL
+  const extPattern = extensions.map(e => e.replace('.', '\\.')).join('|');
+  const urlRegex = new RegExp(`https?://[^"'\\s<>}\\\\]+(?:${extPattern})(?:[?#][^"'\\s<>}\\\\]*)?`, 'gi');
+
+  // 扫描所有 <script> 标签
+  document.querySelectorAll('script').forEach((script) => {
+    const text = script.textContent;
+    if (!text || text.length < 50) return; // 跳过空或极短的脚本
+
+    // 仅扫描含有 JSON 数据特征的脚本
+    if (!text.includes('http') || !text.includes('.')) return;
+
+    const matches = text.match(urlRegex);
+    if (!matches) return;
+
+    matches.forEach((url) => {
+      // 清理 URL（去除可能的转义字符）
+      const cleanUrl = url.replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+      if (!seenUrls.has(cleanUrl)) {
+        seenUrls.add(cleanUrl);
+        resources.push({
+          url: cleanUrl,
+          type: mediaType,
+          source: 'embedded-json',
+        });
+      }
+    });
+  });
+}
+
+/**
  * 收集页面中所有媒体资源的 URL
  * @param {Object} options - 用户选项
  * @returns {Object} { mediaResources: [{url, type, filename}] }
@@ -104,6 +154,14 @@ function collectMediaResources(options) {
         }
       });
     });
+
+    // 从页面嵌入的 JSON 数据中提取音频 URL（如 __NEXT_DATA__、__INITIAL_STATE__ 等）
+    extractMediaFromEmbeddedJson(resources, seenUrls, 'audio');
+  }
+
+  // 从页面嵌入的 JSON 数据中提取视频 URL
+  if (options.downloadVideos) {
+    extractMediaFromEmbeddedJson(resources, seenUrls, 'video');
   }
 
   return { mediaResources: resources };
@@ -125,9 +183,36 @@ function generateSnapshot(options, urlMapping) {
     clone.querySelectorAll('style').forEach((s) => s.remove());
   }
 
-  // 移除 <script> 标签（避免执行风险，同时保留页面结构）
+  // ---------- 重写嵌入 JSON 中的媒体路径 ----------
+  // 必须在移除 <script> 之前处理，否则 JSON 数据会丢失
+  // 将 <script> 中的媒体 URL 替换为本地路径，同时将 script type 改为 application/json
+  // 这样离线查看时数据保留但不会执行
+  if (options.downloadAudio || options.downloadVideos) {
+    clone.querySelectorAll('script').forEach((script) => {
+      const text = script.textContent;
+      if (!text || !text.includes('http')) return;
+      // 保留 application/ld+json 和 application/json 类型
+      if (script.type === 'application/ld+json' || script.type === 'application/json') return;
+
+      let modified = text;
+      let changed = false;
+      for (const [originalUrl, localName] of Object.entries(urlMapping)) {
+        if (modified.includes(originalUrl)) {
+          modified = modified.split(originalUrl).join('./media/' + localName);
+          changed = true;
+        }
+      }
+      if (changed) {
+        script.textContent = modified;
+        // 改为 JSON 类型，防止执行但保留数据
+        script.type = 'application/json';
+      }
+    });
+  }
+
+  // 移除 <script> 标签（避免执行风险）
+  // 保留 type="application/ld+json"、"application/json" 等非执行脚本
   clone.querySelectorAll('script').forEach((s) => {
-    // 保留 type="application/ld+json" 等非执行脚本
     if (s.type && s.type !== 'text/javascript' && s.type !== 'module') return;
     s.remove();
   });
