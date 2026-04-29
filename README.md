@@ -32,7 +32,7 @@ chrome-web-saver/
 
 1. **克隆或下载本项目**到本地：
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/hlizao/WebPageSaver_GLM.git
    cd chrome-web-saver
    ```
 
