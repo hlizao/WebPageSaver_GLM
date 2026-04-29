@@ -3,13 +3,19 @@
  * 负责协调 content script 和下载操作
  * 核心流程：
  *   1. 注入 content.js 收集资源列表
- *   2. 逐个下载媒体资源到 media 文件夹
+ *   2. 逐个下载媒体资源到对应子目录
  *   3. 通知 content.js 生成 HTML 快照（路径已重写）
  *   4. 下载 HTML 文件
+ *
+ * 跨平台兼容：Windows / macOS / Linux
+ * - 文件名清理：覆盖三平台非法字符、保留名、控制字符
+ * - 路径分隔符：Chrome downloads API 统一使用 /
+ * - 大小写敏感：macOS/Windows 不区分大小写，Linux 区分，去重时统一小写比较
+ * - Blob URL：MV3 Service Worker 不支持 URL.createObjectURL，使用 data: URL 替代
  */
 
 // ============================================================
-// 工具函数
+// 常量定义
 // ============================================================
 
 /**
@@ -20,6 +26,11 @@ const MEDIA_SUBDIRS = {
   video: 'videos',
   audio: 'audios',
 };
+
+/**
+ * 下载根目录名
+ */
+const DOWNLOAD_ROOT = 'WebPageSaver';
 
 /**
  * 跨平台路径分隔符（Chrome downloads API 始终使用 /）
@@ -36,18 +47,47 @@ const WIN_RESERVED_NAMES = new Set([
 ]);
 
 /**
+ * 文件名最大长度（兼容各平台：Windows 260路径限制减去目录部分）
+ */
+const MAX_FILENAME_LENGTH = 200;
+
+// ============================================================
+// 工具函数
+// ============================================================
+
+/**
  * 从 URL 中提取文件名（跨平台安全）
+ * 处理 CDN URL 中的 @后缀（如 image.jpg@small → image_small.jpg）
  * @param {string} url - 资源 URL
  * @returns {string} 安全的文件名
  */
 function extractFilename(url) {
   try {
     const pathname = new URL(url).pathname;
-    const rawName = decodeURIComponent(pathname.split(PATH_SEP).pop() || '');
+    let rawName = decodeURIComponent(pathname.split(PATH_SEP).pop() || '');
 
     // 如果没有扩展名或文件名为空，生成默认名
-    if (!rawName || rawName.length > 200) {
+    if (!rawName || rawName.length > MAX_FILENAME_LENGTH) {
       return 'resource_' + Date.now();
+    }
+
+    // 处理 CDN 后缀（如 image.jpg@small, image.png@thumbnail）
+    // 将 @xxx 转为 _xxx 并确保扩展名正确
+    const atIndex = rawName.lastIndexOf('@');
+    if (atIndex > 0) {
+      const beforeAt = rawName.substring(0, atIndex);
+      const afterAt = rawName.substring(atIndex + 1);
+      // 检查 @ 之前是否有扩展名
+      const dotBeforeAt = beforeAt.lastIndexOf('.');
+      if (dotBeforeAt > 0) {
+        // image.jpg@small → image_small.jpg
+        const ext = beforeAt.substring(dotBeforeAt);
+        const base = beforeAt.substring(0, dotBeforeAt);
+        rawName = base + '_' + afterAt + ext;
+      } else {
+        // image@small → image_small
+        rawName = beforeAt + '_' + afterAt;
+      }
     }
 
     // 清理文件名中的非法字符（覆盖 Windows/macOS/Linux）
@@ -57,7 +97,7 @@ function extractFilename(url) {
       .replace(/_+/g, '_')                        // 合并连续下划线
       .replace(/^\.+/, '_')                       // 不以点开头（防止隐藏文件）
       .replace(/\.+$/, '')                        // 不以点结尾
-      .substring(0, 200);                         // 限制长度
+      .substring(0, MAX_FILENAME_LENGTH);          // 限制长度
 
     // 处理 Windows 保留文件名
     const dotIndex = safeName.lastIndexOf('.');
@@ -74,13 +114,16 @@ function extractFilename(url) {
 
 /**
  * 确保文件名唯一：如果重名则添加序号
+ * 跨平台注意：macOS/Windows 文件系统不区分大小写，
+ * 所以去重时使用小写比较，确保不会产生同名文件
  * @param {string} name - 原始文件名
- * @param {Set<string>} usedNames - 已使用的文件名集合
+ * @param {Set<string>} usedNames - 已使用的文件名集合（小写）
  * @returns {string} 唯一的文件名
  */
 function ensureUniqueName(name, usedNames) {
-  if (!usedNames.has(name)) {
-    usedNames.add(name);
+  const lowerName = name.toLowerCase();
+  if (!usedNames.has(lowerName)) {
+    usedNames.add(lowerName);
     return name;
   }
   // 拆分文件名和扩展名
@@ -90,13 +133,31 @@ function ensureUniqueName(name, usedNames) {
 
   let counter = 1;
   let newName;
+  let newLower;
   do {
     newName = `${base}_${counter}${ext}`;
+    newLower = newName.toLowerCase();
     counter++;
-  } while (usedNames.has(newName));
+  } while (usedNames.has(newLower));
 
-  usedNames.add(newName);
+  usedNames.add(newLower);
   return newName;
+}
+
+/**
+ * 将 Blob 转为 data: URL（MV3 Service Worker 兼容）
+ * MV3 的 Service Worker 不支持 URL.createObjectURL，
+ * 使用 data: URL 作为替代方案
+ * @param {Blob} blob - 要转换的 Blob
+ * @returns {Promise<string>} data: URL 字符串
+ */
+async function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Blob 转 data URL 失败'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 /**
@@ -152,6 +213,15 @@ function sanitizeFilename(title) {
   return safeName;
 }
 
+/**
+ * 构建下载文件路径（统一使用 / 分隔符）
+ * @param  {...string} parts - 路径组成部分
+ * @returns {string} 完整的下载路径
+ */
+function buildDownloadPath(...parts) {
+  return [DOWNLOAD_ROOT, ...parts].join(PATH_SEP);
+}
+
 // ============================================================
 // 消息处理
 // ============================================================
@@ -192,8 +262,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // ----------------------------------------------------------
       // 步骤 3：逐个下载媒体资源
       // ----------------------------------------------------------
-      const urlMapping = {};   // 原始 URL → 本地文件名
-      const usedNames = new Set();
+      const urlMapping = {};   // 原始 URL → 本地相对路径（如 pictures/xxx.jpg）
+      const usedNames = new Set();  // 小写文件名集合，兼容大小写不敏感的文件系统
 
       for (let i = 0; i < resources.length; i++) {
         const res = resources[i];
@@ -210,17 +280,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // 尝试下载资源
         const blob = await fetchAsBlob(res.url);
         if (blob) {
-          // 使用 chrome.downloads API 保存到 media 子文件夹
-          const blobUrl = URL.createObjectURL(blob);
+          // MV3 Service Worker 不支持 URL.createObjectURL
+          // 使用 data: URL 替代
+          const dataUrl = await blobToDataUrl(blob);
           try {
             await chrome.downloads.download({
-              url: blobUrl,
-              filename: ['_web_saver_temp', 'media', localPath].join(PATH_SEP),
+              url: dataUrl,
+              filename: buildDownloadPath('media', localPath),
               saveAs: false,
               conflictAction: 'uniquify',
             });
-          } finally {
-            URL.revokeObjectURL(blobUrl);
+          } catch (downloadErr) {
+            // data: URL 可能因过大而失败，尝试直接用原始 URL
+            console.warn('data URL 下载失败，尝试直接下载:', downloadErr.message);
+            try {
+              await chrome.downloads.download({
+                url: res.url,
+                filename: buildDownloadPath('media', localPath),
+                saveAs: false,
+                conflictAction: 'uniquify',
+              });
+            } catch (directErr) {
+              console.warn('直接下载也失败:', directErr.message);
+            }
+          }
+        } else {
+          // fetch 失败，尝试让 Chrome 直接下载原始 URL
+          try {
+            await chrome.downloads.download({
+              url: res.url,
+              filename: buildDownloadPath('media', localPath),
+              saveAs: false,
+              conflictAction: 'uniquify',
+            });
+          } catch (directErr) {
+            console.warn('资源下载失败，跳过:', res.url, directErr.message);
           }
         }
       }
@@ -245,18 +339,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tab = await chrome.tabs.get(tabId);
       const pageName = sanitizeFilename(tab.title);
 
-      // 将 HTML 内容转为 Blob 并下载
+      // 将 HTML 内容转为 data: URL（MV3 兼容）
       const htmlBlob = new Blob([snapshotResult.html], { type: 'text/html;charset=utf-8' });
-      const htmlBlobUrl = URL.createObjectURL(htmlBlob);
+      const htmlDataUrl = await blobToDataUrl(htmlBlob);
 
       await chrome.downloads.download({
-        url: htmlBlobUrl,
-        filename: ['_web_saver_temp', pageName + '.html'].join(PATH_SEP),
+        url: htmlDataUrl,
+        filename: buildDownloadPath(pageName + '.html'),
         saveAs: false,
         conflictAction: 'uniquify',
       });
-
-      URL.revokeObjectURL(htmlBlobUrl);
 
       // ----------------------------------------------------------
       // 完成！
