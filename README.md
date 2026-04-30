@@ -1,3 +1,175 @@
+# 💾 WebPageSaver - Chrome Extension
+
+A Manifest V3 Chrome extension that saves the current web page as a local HTML file and downloads all media resources into categorized subdirectories, ensuring the page can be viewed completely offline.
+
+Supports **Windows / macOS / Linux**.
+
+---
+
+[中文版](#-网页保存器---chrome-扩展)
+
+---
+
+## ✨ Features
+
+- **Save complete web pages**: Save the current page's DOM structure and styles as a `.html` file
+- **Download media resources**: Automatically extract and download images, videos, and audio to corresponding subdirectories
+- **Embedded JSON audio extraction**: Scan audio/video URLs from embedded JSON like `__NEXT_DATA__`
+- **Media organized by type**: `pictures/` `videos/` `audios/`
+- **Automatic path rewriting**: Media references in HTML are replaced with local relative paths
+- **Concurrent download throttling**: Max 3 concurrent, exponential backoff retry (up to 3 times)
+- **Content-Type validation**: Reject non-media responses (e.g., executable files)
+- **Download history**: Avoid duplicate downloads within a session
+- **Large file streaming**: Files over 10MB are downloaded directly via URL without loading into memory
+- **Real-time progress**: Success / skipped / failed statistics
+- **System notifications**: Notify when download is complete
+- **User options**: Choose to download images/videos/audio, keep inline styles
+- **Offline media playback**: Automatically inject native HTML5 players so saved pages can play audio/video
+- **Browser download setting detection**: Detect "Ask where to save" setting and guide users to disable it
+- **Cross-platform compatibility**: Filename sanitization for Windows/macOS/Linux
+
+## 📁 Project Structure
+
+```
+WebPageSaver_GLM/
+├── manifest.json        # Extension manifest (Manifest V3)
+├── background.js        # Service Worker: download coordination, retry, security
+├── content.js           # Content script: DOM ops, resource collection, snapshot generation
+├── popup.html           # Popup UI
+├── popup.js             # Popup logic
+├── PRIVACY.md           # Privacy policy
+├── .eslintrc.json       # ESLint config
+├── icons/
+│   ├── icon16.png
+│   ├── icon48.png
+│   └── icon128.png
+└── README.md
+```
+
+## 🔧 Installation
+
+1. **Clone or download this project**:
+   ```bash
+   git clone https://github.com/hlizao/WebPageSaver_GLM.git
+   cd WebPageSaver_GLM
+   ```
+
+2. **Open Chrome Extensions page**: Type `chrome://extensions/` in the address bar
+
+3. **Enable Developer mode**: Toggle "Developer mode" in the top right
+
+4. **Load the extension**: Click "Load unpacked" → select the project root directory
+
+5. **Start using**: The 💾 icon appears in the toolbar
+
+## 📖 Usage
+
+1. Open a web page in Chrome
+2. Click the 💾 icon in the toolbar
+3. Toggle options:
+   - ☑️ Download images
+   - ☑️ Download videos
+   - ☑️ Download audio
+   - ☑️ Keep inline styles
+4. Click "Save Current Page"
+5. Files are downloaded to `Downloads/WebPageSaver/`
+
+## 📂 Download Structure
+
+```
+Downloads/
+└── WebPageSaver/
+    ├── Page Title.html
+    └── media/
+        ├── pictures/
+        │   ├── cover.jpg
+        │   ├── avatar_small.png    # CDN @suffix auto-conversion
+        │   └── icon.svg
+        ├── videos/
+        │   └── clip.mp4
+        └── audios/
+            └── episode.m4a         # Extracted from embedded JSON
+```
+
+## 🌐 Cross-Platform Compatibility
+
+| Item | Description |
+|------|-------------|
+| MV3 Service Worker | No `URL.createObjectURL`; uses `data:` URL with fallback to original URL |
+| Illegal filename chars | Sanitizes `<>:"/\|?*` and control chars `\x00-\x1f` |
+| Windows reserved names | `CON`/`PRN`/`AUX`/`NUL`/`COM1-9`/`LPT1-9` prefixed with `_` |
+| Case sensitivity | macOS/Windows case-insensitive; lowercase comparison for dedup |
+| Hidden files | Blocks filenames starting with `.` |
+| Filename length | Limited to 200 characters |
+| Path separator | Chrome downloads API uses `/` uniformly |
+| CDN @suffix | `image.jpg@small` → `image_small.jpg` |
+| URL resolution | Uses `new URL(url, document.baseURI)` for absolute URL |
+
+## 🔒 Security
+
+| Mechanism | Description |
+|-----------|-------------|
+| Minimal permissions | Uses `activeTab` only; grants access on icon click |
+| Content-Type validation | Rejects non-media responses (e.g., executables) |
+| Dangerous extension blacklist | `.exe` `.bat` `.cmd` `.sh` `.js` etc. are blocked |
+| Script removal | Removes executable `<script>` tags; data scripts converted to `application/json` |
+| MV3 compliance | No `host_permissions`, no `web_accessible_resources` |
+
+## 🎵 Offline Media Playback
+
+Custom players (React/Vue JS-driven) in the original page become non-functional after saving because JS is removed. The extension automatically:
+
+1. **Injects native players**: Adds `controls` attribute to `<audio>` / `<video>` elements
+2. **Removes hidden styles**: Original pages may hide `<audio>` via CSS (for custom UI); these are removed
+3. **Hides broken UI**: Automatically hides non-functional custom player buttons/progress bars
+4. **Timestamp jumping**: Injects script so `data-timestamp` links (e.g., podcast timestamps like `09:24`) work
+
+> Works with Xiaoyuzhou FM, NetEase Cloud Music, and other podcast/audio sites.
+
+## 🔍 Browser Download Setting Detection
+
+When clicking "Save Current Page", the extension automatically detects if "Ask where to save each file before downloading" is enabled:
+
+- **Disabled**: Saves normally
+- **Enabled**: Shows a modal prompting the user to disable it at `chrome://settings/downloads`
+
+> Without disabling this setting, a save dialog will pop up for every media file, making the extension unusable.
+
+## ⚡ Performance
+
+| Optimization | Description |
+|-------------|-------------|
+| Concurrent throttling | Max 3 concurrent downloads |
+| Exponential backoff | Retry at 1s → 2s → 4s, max 3 times |
+| Large file streaming | >10MB downloaded directly via URL |
+| Download history | `chrome.storage.local` caches downloaded records |
+| Auto-cleanup | Keeps last 500 records to prevent storage bloat |
+
+## ⚠️ Notes
+
+- Some cross-origin resources may fail due to CORS restrictions; the extension will skip them
+- `blob:` and `data:` URL resources cannot be downloaded separately (retained in HTML)
+- Dynamic content is captured based on the DOM state at the time of saving
+- Large `data:` URLs may fail; the extension falls back to the original URL
+- The browser's "Ask where to save" setting must be disabled
+- Custom JS-driven players in the original page are replaced with native HTML5 players
+
+## 🔑 Permissions
+
+| Permission | Purpose |
+|-----------|---------|
+| `activeTab` | Access current tab when icon is clicked |
+| `scripting` | Inject content script into the page |
+| `downloads` | Download HTML and media files |
+| `storage` | Store user preferences and download history |
+| `notifications` | Send system notification on completion |
+
+## 📜 License
+
+MIT License
+
+---
+
 # 💾 网页保存器 - Chrome 扩展
 
 一个基于 Manifest V3 的 Chrome 浏览器扩展，将当前网页保存为本地 HTML 文件，并下载所有媒体资源到分类子目录，确保离线后可完整查看。
@@ -31,6 +203,7 @@ WebPageSaver_GLM/
 ├── content.js           # 内容脚本，DOM 操作、资源收集、快照生成
 ├── popup.html           # 弹出界面
 ├── popup.js             # 弹出界面逻辑
+├── PRIVACY.md           # 隐私政策
 ├── .eslintrc.json       # ESLint 配置
 ├── icons/
 │   ├── icon16.png
