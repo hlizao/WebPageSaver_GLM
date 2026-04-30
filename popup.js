@@ -20,82 +20,11 @@ const optImages = document.getElementById('optImages');
 const optVideos = document.getElementById('optVideos');
 const optAudio = document.getElementById('optAudio');
 const optInlineStyles = document.getElementById('optInlineStyles');
-const browserSettingTip = document.getElementById('browserSettingTip');
-const openDownloadSettings = document.getElementById('openDownloadSettings');
 
 // 统计计数
 let successCount = 0;
 let skippedCount = 0;
 let failedCount = 0;
-
-// ============================================================
-// 检测浏览器"下载前询问"设置
-// 方案：发起一个极小的测试下载（1x1 transparent PNG），
-// 如果下载被中断或超时，说明浏览器可能在弹出保存对话框。
-// 如果下载正常完成，说明没有开启该设置，隐藏提示。
-// ============================================================
-
-const DOWNLOAD_ROOT_PATH = 'WebPageSaver';
-
-(async function checkBrowserDownloadSetting() {
-  try {
-    // 1x1 transparent PNG (最小有效图片，约68字节)
-    const testUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAABJRUEFTkSuQmCC';
-    const testPath = DOWNLOAD_ROOT_PATH + '/_test.tmp';
-
-    const downloadId = await chrome.downloads.download({
-      url: testUrl,
-      filename: testPath,
-      saveAs: false,
-      conflictAction: 'overwrite',
-    });
-
-    // 等待下载结果，2秒超时
-    await new Promise((resolve) => {
-      let resolved = false;
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          browserSettingTip.style.display = 'block'; // 超时→可能弹窗阻塞
-          cleanupTest(downloadId);
-          resolve();
-        }
-      }, 2000);
-
-      chrome.downloads.onChanged.addListener(function listener(delta) {
-        if (delta.id !== downloadId) return;
-        if (delta.state) {
-          chrome.downloads.onChanged.removeListener(listener);
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timeout);
-            if (delta.state.current === 'interrupted') {
-              browserSettingTip.style.display = 'block'; // 中断→可能弹窗取消
-            }
-            // 正常完成 → 不显示提示
-            cleanupTest(downloadId);
-            resolve();
-          }
-        }
-      });
-    });
-  } catch {
-    // 测试下载失败，保守起见显示提示
-    browserSettingTip.style.display = 'block';
-  }
-})();
-
-function cleanupTest(downloadId) {
-  chrome.downloads.removeFile(downloadId).catch(() => {});
-  chrome.downloads.erase({ id: downloadId }).catch(() => {});
-}
-
-// 点击"关闭该设置"链接，打开 Chrome 下载设置页面
-openDownloadSettings.addEventListener('click', (e) => {
-  e.preventDefault();
-  chrome.tabs.create({ url: 'chrome://settings/downloads' });
-  browserSettingTip.style.display = 'none';
-});
 
 // ============================================================
 // 初始化：获取当前标签页信息
