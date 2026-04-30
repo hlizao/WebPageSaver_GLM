@@ -208,6 +208,138 @@ function collectMediaResources(options) {
 }
 
 // ============================================================
+// 注入原生 HTML5 播放器
+// ============================================================
+
+/**
+ * 为保存后的离线页面注入浏览器原生媒体播放器
+ * 
+ * 原理：原网页的播放器通常是 JS 驱动的自定义 UI（React/Vue 等），
+ * 保存后 JS 被移除，自定义播放按钮失效，用户无法播放音视频。
+ * 
+ * 修复方式：
+ * 1. 找到所有 <audio>/<video> 标签，添加 controls 属性
+ * 2. 在 <audio>/<video> 后插入一个原生播放器容器
+ * 3. 隐藏原来失效的自定义播放器 UI
+ * 4. 注入少量内联 JS 激活播放控制
+ * 
+ * @param {Document|Element} clone - 克隆的 DOM 根节点
+ */
+function injectNativeMediaPlayers(clone) {
+  // ---------- 处理 <audio> 标签 ----------
+  clone.querySelectorAll('audio').forEach((audio) => {
+    const src = audio.getAttribute('src') || audio.querySelector('source')?.getAttribute('src');
+    if (!src) return; // 无有效源，跳过
+
+    // 确保 audio 可见（原页面可能用 CSS 隐藏，因为用了自定义 UI）
+    audio.removeAttribute('hidden');
+    audio.removeAttribute('style');
+    audio.setAttribute('controls', '');
+    audio.setAttribute('preload', 'auto');
+
+    // 找到包含 audio 的播放器容器，隐藏失效的自定义 UI
+    const playerContainer = findPlayerContainer(audio);
+    if (playerContainer) {
+      // 隐藏容器内所有自定义按钮/进度条等 UI 元素
+      hideCustomPlayerUI(playerContainer, audio);
+    }
+  });
+
+  // ---------- 处理 <video> 标签 ----------
+  clone.querySelectorAll('video').forEach((video) => {
+    const src = video.getAttribute('src') || video.querySelector('source')?.getAttribute('src');
+    if (!src) return;
+
+    video.removeAttribute('hidden');
+    video.removeAttribute('style');
+    video.setAttribute('controls', '');
+    video.setAttribute('preload', 'auto');
+    video.style.maxWidth = '100%';
+    video.style.height = 'auto';
+
+    const playerContainer = findPlayerContainer(video);
+    if (playerContainer) {
+      hideCustomPlayerUI(playerContainer, video);
+    }
+  });
+
+  // ---------- 注入少量内联脚本修复时间戳跳转 ----------
+  // 原页面中可能有 <a class="timestamp" data-timestamp="12">00:12</a> 的时间戳链接
+  // 保存后需要让这些链接能跳转到对应时间播放
+  const timestamps = clone.querySelectorAll('[data-timestamp]');
+  if (timestamps.length > 0) {
+    const tsScript = document.createElement('script');
+    tsScript.type = 'text/javascript';
+    tsScript.textContent = `
+document.querySelectorAll('[data-timestamp]').forEach(function(el) {
+  el.style.cursor = 'pointer';
+  el.addEventListener('click', function(e) {
+    e.preventDefault();
+    var audio = document.querySelector('audio[controls]');
+    if (audio) {
+      audio.currentTime = parseInt(el.getAttribute('data-timestamp'), 10);
+      audio.play();
+    }
+  });
+});
+`;
+    // 这个脚本需要执行，所以不能标记为 application/json
+    // 插入到 body 末尾
+    const body = clone.querySelector('body');
+    if (body) {
+      body.appendChild(tsScript);
+    }
+  }
+}
+
+/**
+ * 向上查找包含 media 元素的播放器容器
+ * 通常自定义播放器有一个外层容器包裹 audio + 自定义 UI
+ * @param {Element} mediaEl - <audio> 或 <video> 元素
+ * @returns {Element|null} 播放器容器元素
+ */
+function findPlayerContainer(mediaEl) {
+  let el = mediaEl.parentElement;
+  // 向上查找 3 层，找到一个包含多个子元素（说明是播放器容器）的节点
+  for (let i = 0; i < 3 && el; i++) {
+    if (el.children.length >= 2) {
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+
+/**
+ * 隐藏自定义播放器 UI，保留 media 元素可见
+ * @param {Element} container - 播放器容器
+ * @param {Element} mediaEl - <audio> 或 <video> 元素
+ */
+function hideCustomPlayerUI(container, mediaEl) {
+  // 给容器添加内联样式，使 media 可见，隐藏其他 UI
+  // 遍历容器的直接子元素，隐藏非 media 元素
+  Array.from(container.children).forEach((child) => {
+    if (child === mediaEl) {
+      // 确保 media 元素可见
+      child.style.display = '';
+      child.style.visibility = 'visible';
+      child.style.opacity = '1';
+    } else if (child.tagName !== 'SCRIPT' && child.tagName !== 'STYLE') {
+      // 隐藏自定义 UI 元素（按钮、进度条等）
+      child.style.display = 'none';
+    }
+  });
+
+  // 容器本身也要确保可见
+  container.style.display = '';
+  container.style.visibility = 'visible';
+  container.style.opacity = '1';
+  // 移除可能隐藏容器的 class 效果
+  container.style.height = 'auto';
+  container.style.overflow = 'visible';
+}
+
+// ============================================================
 // 快照生成
 // ============================================================
 
@@ -310,7 +442,7 @@ function generateSnapshot(options, urlMapping) {
     });
   }
 
-  // ---------- 重写音频路径 ----------
+  // ---------- 重写音频路径 + 注入原生播放器 ----------
   clone.querySelectorAll('audio').forEach((audio) => {
     const src = audio.getAttribute('src');
     if (src && urlMapping[src]) {
@@ -323,6 +455,11 @@ function generateSnapshot(options, urlMapping) {
       }
     });
   });
+
+  // ---------- 注入原生 HTML5 播放器 ----------
+  // 保存后 JS 被移除，自定义播放器（React 等）失效，
+  // 需要注入浏览器原生 controls 播放器才能在离线页面中播放媒体
+  injectNativeMediaPlayers(clone);
 
   // ---------- 注入离线保存标记样式 ----------
   const baseStyle = document.createElement('style');
