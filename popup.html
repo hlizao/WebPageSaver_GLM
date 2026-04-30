@@ -117,6 +117,21 @@
       background: #f0f0f0;
       border-radius: 4px;
     }
+    .browser-setting-tip {
+      font-size: 11px;
+      color: #e65100;
+      background: #fff3e0;
+      border: 1px solid #ffcc80;
+      border-radius: 6px;
+      padding: 8px;
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    .browser-setting-tip a {
+      color: #1565c0;
+      text-decoration: underline;
+      cursor: pointer;
+    }
     .btn {
       width: 100%;
       padding: 10px;
@@ -180,6 +195,12 @@
         <span class="skipped" id="statsSkipped"></span>
         <span class="failed" id="statsFailed"></span>
       </div>
+    </div>
+
+    <!-- 浏览器设置提示 -->
+    <div class="browser-setting-tip" id="browserSettingTip" style="display:none">
+      ⚠️ 浏览器已开启"下载前询问每个文件的保存位置"，保存时会逐个弹窗确认。
+      <a href="#" id="openDownloadSettings">点击关闭该设置</a>
     </div>
 
     <!-- 下载目录提示 -->

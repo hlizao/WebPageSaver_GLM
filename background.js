@@ -477,6 +477,24 @@ async function downloadResources(resources, onProgress) {
 }
 
 // ============================================================
+// 下载前强制确认文件名，阻止浏览器"下载前询问"弹窗
+// 当用户浏览器开启了"下载前询问每个文件的保存位置"时，
+// saveAs: false 可能被忽略，导致每个文件都弹出保存对话框。
+// 通过 onDeterminingFilename 监听器主动 suggest 文件名，
+// 可以在下载确定阶段直接确认，有效阻止弹窗出现。
+// ============================================================
+
+chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
+  // 只处理本扩展发起的下载（路径以 WebPageSaver/ 开头）
+  if (downloadItem.filename && downloadItem.filename.startsWith(DOWNLOAD_ROOT + PATH_SEP)) {
+    suggest({ filename: downloadItem.filename, conflictAction: 'uniquify' });
+  } else {
+    // 非本扩展的下载，不干预
+    suggest();
+  }
+});
+
+// ============================================================
 // 消息处理（主流程）
 // ============================================================
 
@@ -542,7 +560,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tab = await chrome.tabs.get(tabId);
       const pageName = sanitizeFilename(tab.title);
 
-      // 使用 data: URL 保存 HTML（MV3 Service Worker 兼容，HTML 通常不会太大）
+      // 使用 data: URL 保存 HTML
+      // 注意：data: URL 配合 saveAs: false 在部分 Chrome 版本仍可能触发保存对话框，
+      // 但通过 onDeterminingFilename 监听器已可阻止。保留 data: URL 方式以兼容 MV3。
       const htmlDataUrl = contentToDataUrl(snapshotResult.html);
 
       await chrome.downloads.download({
