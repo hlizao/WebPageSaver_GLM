@@ -117,6 +117,34 @@
       background: #f0f0f0;
       border-radius: 4px;
     }
+    /* 模态弹窗遮罩 */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-box {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      max-width: 300px;
+      width: 90%;
+      text-align: center;
+    }
+    .modal-box .modal-icon { font-size: 36px; margin-bottom: 8px; }
+    .modal-box .modal-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #d32f2f; }
+    .modal-box .modal-desc { font-size: 12px; color: #666; line-height: 1.5; margin-bottom: 16px; }
+    .modal-box .modal-btns { display: flex; gap: 8px; }
+    .modal-box .modal-btns button { flex: 1; padding: 8px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .modal-box .btn-cancel { background: #f5f5f5; color: #666; }
+    .modal-box .btn-goto { background: #1a73e8; color: white; }
+    .modal-box .btn-goto:hover { background: #1557b0; }
+
     .btn {
       width: 100%;
       padding: 10px;
@@ -189,6 +217,23 @@
 
     <!-- 操作按钮 -->
     <button class="btn btn-primary" id="saveBtn" style="margin-top:12px">保存当前网页</button>
+  </div>
+
+  <!-- 浏览器设置检测弹窗 -->
+  <div class="modal-overlay" id="downloadSettingModal">
+    <div class="modal-box">
+      <div class="modal-icon">⚠️</div>
+      <div class="modal-title">请关闭"下载前询问"</div>
+      <div class="modal-desc">
+        您的浏览器开启了"下载前询问每个文件的保存位置"，<br>
+        保存网页时每个文件都会弹出确认框，无法正常使用。<br><br>
+        请前往浏览器设置关闭该选项后重试。
+      </div>
+      <div class="modal-btns">
+        <button class="btn-cancel" id="modalCancel">取消</button>
+        <button class="btn-goto" id="modalGoSettings">前往设置</button>
+      </div>
+    </div>
   </div>
 
   <script src="popup.js"></script>
