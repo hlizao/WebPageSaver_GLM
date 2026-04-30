@@ -48,48 +48,74 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
 
 /**
  * 检测浏览器是否开启了"下载前询问每个文件的保存位置"
+ * 原理：用 chrome.downloads.download 发起一个微型测试下载，
+ * 若浏览器弹出保存对话框，下载会被挂起（in_progress 不结束），
+ * 用户取消后变为 interrupted；若未弹出则瞬间完成（complete）。
+ * 
+ * 关键：必须先注册 onChanged 监听器，再发起下载，
+ * 否则 data: URL 下载太快，事件在监听器注册前就触发了，导致误判。
+ * 
  * @returns {Promise<boolean>} true = 未开启（可正常使用），false = 已开启（会弹窗）
  */
 function checkDownloadSetting() {
   return new Promise((resolve) => {
-    // 1x1 transparent PNG
     const testUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAABJRUEFTkSuQmCC';
     const testPath = 'WebPageSaver/_detect.tmp';
+
+    let resolved = false;
+    let downloadId = null;
+
+    // 先注册监听器，再发起下载，避免错过事件
+    const listener = function(delta) {
+      if (downloadId === null || delta.id !== downloadId) return;
+      if (delta.state) {
+        const state = delta.state.current;
+        if (state === 'complete') {
+          finish(true);
+        } else if (state === 'interrupted') {
+          finish(false);
+        }
+        // in_progress 状态继续等待
+      }
+    };
+    chrome.downloads.onChanged.addListener(listener);
+
+    // 超时保护：3秒内未完成视为弹窗阻塞
+    const timeout = setTimeout(() => {
+      finish(false);
+    }, 3000);
+
+    function finish(ok) {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      chrome.downloads.onChanged.removeListener(listener);
+      if (downloadId) cleanupTest(downloadId);
+      resolve(ok);
+    }
 
     chrome.downloads.download({
       url: testUrl,
       filename: testPath,
       saveAs: false,
       conflictAction: 'overwrite',
-    }, (downloadId) => {
-      if (chrome.runtime.lastError || !downloadId) {
-        resolve(false); // 下载 API 失败，保守判断为有问题
+    }, (id) => {
+      if (chrome.runtime.lastError || !id) {
+        finish(false);
         return;
       }
+      downloadId = id;
 
-      let resolved = false;
-
-      // 2秒超时：如果下载没有快速完成，说明弹窗阻塞了
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          cleanupTest(downloadId);
-          resolve(false);
-        }
-      }, 2000);
-
-      chrome.downloads.onChanged.addListener(function listener(delta) {
-        if (delta.id !== downloadId) return;
-        if (delta.state) {
-          chrome.downloads.onChanged.removeListener(listener);
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timeout);
-            const state = delta.state.current;
-            cleanupTest(downloadId);
-            // complete → 未开启弹窗；interrupted → 用户在弹窗中取消了
-            resolve(state === 'complete');
+      // 下载可能已瞬间完成（data: URL 极小），检查一下当前状态
+      chrome.downloads.search({ id }, (results) => {
+        if (results && results.length > 0) {
+          const state = results[0].state;
+          if (state === 'complete') {
+            finish(true);
+          } else if (state === 'interrupted') {
+            finish(false);
           }
+          // in_progress → 继续等 onChanged
         }
       });
     });
